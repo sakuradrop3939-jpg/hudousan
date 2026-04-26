@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ぼろ戸建て投資物件リスト</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+      background: #f0f2f5; color: #1a1a2e; font-size: 13px;
+    }
+    header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: white; padding: 14px 16px; position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    header h1 { font-size: 16px; font-weight: 700; }
+    header .meta { font-size: 11px; color: #aaa; margin-top: 4px; }
+    .controls {
+      padding: 10px 12px; background: white;
+      border-bottom: 1px solid #e0e0e0; display: flex; gap: 8px; flex-wrap: wrap;
+      position: sticky; top: 56px; z-index: 99;
+    }
+    .controls input {
+      flex: 1; min-width: 160px; padding: 7px 10px; border: 1px solid #ccc;
+      border-radius: 8px; font-size: 13px; outline: none;
+    }
+    .controls select {
+      padding: 7px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 13px;
+      background: white; outline: none;
+    }
+    .stats {
+      padding: 8px 12px; background: #e8f4fd; font-size: 12px; color: #555;
+      border-bottom: 1px solid #ddd;
+    }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table {
+      width: 100%; border-collapse: collapse; white-space: nowrap;
+    }
+    thead th {
+      background: #1a1a2e; color: white; padding: 10px 10px;
+      text-align: left; font-size: 11px; font-weight: 600; cursor: pointer;
+      user-select: none; position: sticky; top: 0;
+    }
+    thead th:hover { background: #2d3561; }
+    thead th.sort-asc::after  { content: " ▲"; font-size: 9px; }
+    thead th.sort-desc::after { content: " ▼"; font-size: 9px; }
+    tbody tr:nth-child(even) { background: #f8f9fc; }
+    tbody tr:hover { background: #e8f0fe; }
+    td { padding: 9px 10px; border-bottom: 1px solid #e8e8e8; vertical-align: middle; }
+
+    /* スコア列 */
+    .score {
+      font-weight: 700; font-size: 15px; text-align: center;
+      border-radius: 6px; padding: 4px 8px; display: inline-block; min-width: 38px;
+    }
+    .score-s  { background: #1e8c2e; color: white; }   /* 80+ */
+    .score-a  { background: #6abf69; color: white; }   /* 65-79 */
+    .score-b  { background: #f9c74f; color: #333; }    /* 50-64 */
+    .score-c  { background: #f4845f; color: white; }   /* -49 */
+
+    /* 賃貸需要 */
+    .demand { border-radius: 5px; padding: 3px 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .demand-4 { background: #ff6347; color: white; }
+    .demand-3 { background: #ff8c00; color: white; }
+    .demand-2 { background: #ffd700; color: #333; }
+    .demand-1 { background: #87ceeb; color: #333; }
+
+    /* 直リンクボタン */
+    .link-btn {
+      display: inline-block; background: #1a73e8; color: white;
+      padding: 6px 12px; border-radius: 20px; text-decoration: none;
+      font-size: 12px; font-weight: 600; white-space: nowrap;
+      box-shadow: 0 2px 4px rgba(26,115,232,0.3);
+    }
+    .link-btn:hover { background: #1557b0; }
+
+    /* 利回り */
+    .yield-high { color: #1e8c2e; font-weight: 700; }
+    .yield-mid  { color: #e07b00; font-weight: 600; }
+    .yield-low  { color: #999; }
+
+    .reason { white-space: normal; max-width: 300px; font-size: 12px; color: #444; line-height: 1.5; }
+    .no-data { text-align: center; padding: 40px; color: #888; font-size: 15px; }
+    .price { font-weight: 700; color: #c0392b; }
+    .legend {
+      padding: 10px 12px; background: white; border-top: 1px solid #eee;
+      font-size: 11px; color: #666; display: flex; gap: 12px; flex-wrap: wrap;
+    }
+    .legend span { display: flex; align-items: center; gap: 4px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏚️ ぼろ戸建て投資物件リスト</h1>
+  <div class="meta">最終更新: 2026年04月26日 14:29 ｜ スコア高い順</div>
+</header>
+
+<div class="controls">
+  <input type="text" id="filterInput" placeholder="🔍 エリア・間取り・住所などで絞り込み" oninput="applyFilter()">
+  <select id="areaFilter" onchange="applyFilter()">
+    <option value="">全エリア</option>
+  </select>
+  <select id="siteFilter" onchange="applyFilter()">
+    <option value="">全サイト</option>
+  </select>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<div class="table-wrap">
+<table id="propTable">
+  <thead>
+    <tr>
+      <th onclick="sortTable(0)">スコア</th>
+      <th onclick="sortTable(1)">賃貸需要</th>
+      <th onclick="sortTable(2)">エリア</th>
+      <th onclick="sortTable(3)">価格(万)</th>
+      <th onclick="sortTable(4)">間取り</th>
+      <th onclick="sortTable(5)">利回り</th>
+      <th>おすすめ理由</th>
+      <th onclick="sortTable(7)">築年</th>
+      <th onclick="sortTable(8)">土地㎡</th>
+      <th onclick="sortTable(9)">建物㎡</th>
+      <th>駐車場</th>
+      <th>サイト</th>
+      <th>直リンク</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+</div>
+
+<div class="legend">
+  <span>スコア: <span class="score score-s">S 80+</span></span>
+  <span><span class="score score-a">A 65+</span></span>
+  <span><span class="score score-b">B 50+</span></span>
+  <span><span class="score score-c">C -49</span></span>
+  &nbsp;|&nbsp;
+  <span>需要: <span class="demand demand-4">🔴高</span></span>
+  <span><span class="demand demand-3">🟠中高</span></span>
+  <span><span class="demand demand-2">🟡中</span></span>
+  <span><span class="demand demand-1">🔵低</span></span>
+</div>
+
+<script>
+const DATA = [];
+
+let sortCol = 0;
+let sortDir = -1;
+let filtered = [...DATA];
+
+function scoreClass(s) {
+  if (s >= 80) return 'score-s';
+  if (s >= 65) return 'score-a';
+  if (s >= 50) return 'score-b';
+  return 'score-c';
+}
+function yieldClass(y) {
+  if (y >= 10) return 'yield-high';
+  if (y >= 6)  return 'yield-mid';
+  return 'yield-low';
+}
+
+function buildRow(d) {
+  const scoreHtml = `<span class="score ${scoreClass(d.score)}">${d.score}</span>`;
+  const demandHtml = `<span class="demand demand-${d.demand_level}">${d.demand_emoji} ${d.demand_text}</span>`;
+  const yieldHtml = d.yield_pct > 0
+    ? `<span class="${yieldClass(d.yield_pct)}">${d.yield_pct}%</span>` : '-';
+  const linkHtml = d.url
+    ? `<a class="link-btn" href="${d.url}" target="_blank" rel="noopener">見る</a>` : '';
+  return `<tr>
+    <td>${scoreHtml}</td>
+    <td>${demandHtml}</td>
+    <td>${d.area}</td>
+    <td class="price">${d.price}万</td>
+    <td>${d.layout || '-'}</td>
+    <td>${yieldHtml}</td>
+    <td class="reason">${d.reason}</td>
+    <td>${d.age ? d.age+'年' : '-'}</td>
+    <td>${d.land || '-'}</td>
+    <td>${d.building || '-'}</td>
+    <td>${d.parking}</td>
+    <td style="font-size:11px">${d.site}</td>
+    <td>${linkHtml}</td>
+  </tr>`;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="13" class="no-data">条件に合う物件が見つかりません</td></tr>';
+  } else {
+    tbody.innerHTML = filtered.map(buildRow).join('');
+  }
+  document.getElementById('stats').textContent =
+    `${filtered.length}件表示 / 全${DATA.length}件`;
+}
+
+function applyFilter() {
+  const text = document.getElementById('filterInput').value.toLowerCase();
+  const area = document.getElementById('areaFilter').value;
+  const site = document.getElementById('siteFilter').value;
+  filtered = DATA.filter(d => {
+    const matchText = !text || JSON.stringify(d).toLowerCase().includes(text);
+    const matchArea = !area || d.area === area;
+    const matchSite = !site || d.site === site;
+    return matchText && matchArea && matchSite;
+  });
+  renderTable();
+}
+
+function sortTable(col) {
+  const headers = document.querySelectorAll('thead th');
+  headers.forEach(h => h.className = '');
+  if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+  headers[col].className = sortDir === -1 ? 'sort-desc' : 'sort-asc';
+  const keys = ['score','demand_level','area','price','layout','yield_pct','reason','age','land','building'];
+  filtered.sort((a, b) => {
+    const av = a[keys[col]] ?? 0;
+    const bv = b[keys[col]] ?? 0;
+    return typeof av === 'string'
+      ? av.localeCompare(bv, 'ja') * sortDir
+      : (av - bv) * sortDir;
+  });
+  renderTable();
+}
+
+// セレクトボックスの選択肢を動的生成
+function buildFilters() {
+  const areas = [...new Set(DATA.map(d => d.area))].sort((a,b)=>a.localeCompare(b,'ja'));
+  const sites = [...new Set(DATA.map(d => d.site))].sort();
+  const areaEl = document.getElementById('areaFilter');
+  areas.forEach(a => { const o=document.createElement('option'); o.value=a; o.text=a; areaEl.add(o); });
+  const siteEl = document.getElementById('siteFilter');
+  sites.forEach(s => { const o=document.createElement('option'); o.value=s; o.text=s; siteEl.add(o); });
+}
+
+buildFilters();
+sortTable(0);
+</script>
+</body>
+</html>
