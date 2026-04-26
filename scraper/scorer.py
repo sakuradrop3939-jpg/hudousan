@@ -193,29 +193,31 @@ def score(prop, area_cfg: dict = None) -> ScoreResult:
 def passes_criteria(prop, criteria: dict) -> tuple[bool, str]:
     """
     条件チェック。True なら通過。False の場合は除外理由も返す。
+    ※ 情報不明（パース失敗）の場合は除外しない。明示的にNGな場合のみ除外。
     """
-    # 価格
-    if prop.price > criteria["max_price_yen"]:
+    # 価格（0=パース失敗は通過。明示的に500万超のみ除外）
+    if prop.price > 0 and prop.price > criteria["max_price_yen"]:
         return False, f"価格{prop.price_man}万円超過"
 
-    # 間取り（2DK以上）
-    layout = prop.layout.upper()
-    room_count = _extract_room_count(layout)
-    layout_type = _extract_layout_type(layout)
-    if room_count < criteria["min_rooms"]:
-        return False, f"間取り不足({prop.layout})"
-    if layout_type not in ("DK", "LDK", "LK"):
-        return False, f"間取り種別不適({prop.layout})"
+    # 間取り（空=パース失敗は通過。明示的に1K等の場合のみ除外）
+    if prop.layout:
+        layout = prop.layout.upper()
+        room_count = _extract_room_count(layout)
+        layout_type = _extract_layout_type(layout)
+        if room_count > 0 and room_count < criteria["min_rooms"]:
+            return False, f"間取り不足({prop.layout})"
+        if layout_type and layout_type not in ("DK", "LDK", "LK"):
+            return False, f"間取り種別不適({prop.layout})"
 
-    # 再建築不可除外
+    # 再建築不可（明示的に不可の場合のみ除外）
     if criteria["exclude_rebuild_prohibited"] and prop.rebuild_ok is False:
         return False, "再建築不可"
 
-    # 下水道（不明は通過）
+    # 下水道（明示的に未接続の場合のみ除外。不明は通過）
     if criteria["sewage_required"] and prop.sewage is False:
         return False, "下水道未接続"
 
-    # 駐車場（不明は通過）
+    # 駐車場（明示的になしの場合のみ除外。不明は通過）
     if criteria["parking_required"] and prop.parking is False:
         return False, "駐車場なし"
 

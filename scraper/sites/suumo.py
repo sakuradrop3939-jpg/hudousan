@@ -38,8 +38,6 @@ class SuumoScraper(BaseScraper):
             "bs": "011",           # 中古一戸建て
             "ta": area["pref_code"],
             "sc": area["city_code"],
-            "priceL": "500",       # 500万円以下（SUUMO単位: 万円）
-            "priceTani": "%E4%B8%87%E5%86%86",
             "page": page,
         }
         soup = self._soup(BASE_URL, params=params)
