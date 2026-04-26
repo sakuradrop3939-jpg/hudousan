@@ -9,7 +9,9 @@ on:
   workflow_dispatch:        # GitHub 画面から手動実行も可能
 
 permissions:
-  contents: write           # docs/index.html を git push するために必要
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   scrape:
@@ -35,10 +37,11 @@ jobs:
       - name: 巡回スクリプトを実行
         run: python -m scraper.main
 
-      - name: docs/index.html を GitHub Pages にデプロイ
+      - name: docs/index.html をコミット・プッシュ
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/index.html
-          git diff --cached --quiet && echo "変更なし" || git commit -m "🏚️ 物件リスト更新: $(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M JST')"
+          git diff --cached --quiet && echo "変更なし" || \
+            git commit -m "物件リスト更新: $(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M JST')"
           git push
