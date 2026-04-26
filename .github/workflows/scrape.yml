@@ -1,0 +1,44 @@
+name: ぼろ戸建て投資物件 自動巡回
+
+on:
+  schedule:
+    # JST = UTC+9 → UTC で指定
+    - cron: "0 21 * * *"   # 毎日 AM 6:00 JST
+    - cron: "0  3 * * *"   # 毎日 PM12:00 JST
+    - cron: "0  8 * * *"   # 毎日 PM17:00 JST
+  workflow_dispatch:        # GitHub 画面から手動実行も可能
+
+permissions:
+  contents: write           # docs/index.html を git push するために必要
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: Playwright ブラウザをインストール（Yahoo不動産用）
+        run: playwright install chromium --with-deps
+
+      - name: 巡回スクリプトを実行
+        run: python -m scraper.main
+
+      - name: docs/index.html を GitHub Pages にデプロイ
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git diff --cached --quiet && echo "変更なし" || git commit -m "🏚️ 物件リスト更新: $(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M JST')"
+          git push
