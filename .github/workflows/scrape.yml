@@ -31,8 +31,8 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
-      - name: Playwright ブラウザをインストール（Yahoo不動産用）
-        run: playwright install chromium --with-deps
+      - name: Playwright ブラウザをインストール（Yahoo不動産用・失敗しても続行）
+        run: playwright install chromium --with-deps || playwright install chromium || true
 
       - name: 巡回スクリプトを実行
         run: python -m scraper.main
