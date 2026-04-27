@@ -1,22 +1,17 @@
 """
-LIFULL HOME'S 中古一戸建て スクレイパー（requests + session）
+LIFULL HOME'S 中古一戸建て スクレイパー（Playwright使用）
 https://www.homes.co.jp/
 """
 import logging
 import re
-import time
 from datetime import datetime
-
-from bs4 import BeautifulSoup
 
 from .base import BaseScraper, Property
 
 logger = logging.getLogger(__name__)
 
 BASE = "https://www.homes.co.jp"
-TOP_URL = "https://www.homes.co.jp/"
 
-# エリア名 → homes パス（実サイトから確認済み）
 HOMES_PATH = {
     "神戸市長田区":  "/kodate/chuko/hyogo/kobe_nagata-city/list/",
     "神戸市兵庫区":  "/kodate/chuko/hyogo/kobe_hyogo-city/list/",
@@ -35,77 +30,68 @@ HOMES_PATH = {
 
 class HomesScraper(BaseScraper):
     SITE_NAME = "ホームズ"
-    REQUEST_DELAY = (2.0, 3.5)
-
-    def __init__(self):
-        super().__init__()
-        self._session_ready = False
-
-    def _ensure_session(self):
-        if not self._session_ready:
-            self.session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ja,en-US;q=0.9",
-                "Referer": "https://www.homes.co.jp/",
-            })
-            try:
-                self.session.get(TOP_URL, timeout=15)
-                time.sleep(1.5)
-                self._session_ready = True
-            except Exception as e:
-                logger.warning("homes セッション初期化失敗: %s", e)
 
     def search(self, area: dict) -> list[Property]:
         path = HOMES_PATH.get(area["name"])
         if not path:
             return []
+        try:
+            return self._search_playwright(area, path)
+        except Exception as e:
+            logger.warning("homes Playwright失敗(%s): %s", area["name"], e)
+            return []
 
-        self._ensure_session()
+    def _search_playwright(self, area: dict, path: str) -> list[Property]:
+        from playwright.sync_api import sync_playwright
+        from bs4 import BeautifulSoup
+
         results = []
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        url = BASE + path
 
-        for page in range(1, 4):
-            props = self._fetch_page(area, path, page)
-            if not props:
-                break
-            results.extend(props)
-            if len(props) < 20:
-                break
-            time.sleep(2)
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                locale="ja-JP",
+            )
+            page = ctx.new_page()
+
+            for pg in range(1, 4):
+                pg_url = url if pg == 1 else f"{url}?page={pg}"
+                try:
+                    page.goto(pg_url, timeout=30_000, wait_until="domcontentloaded")
+                    page.wait_for_timeout(2000)
+                except Exception:
+                    break
+
+                soup = BeautifulSoup(page.content(), "lxml")
+                items = self._find_items(soup)
+                if not items:
+                    break
+
+                batch = [p for p in (self._parse_item(i, area, now) for i in items) if p]
+                results.extend(batch)
+                if len(batch) < 20:
+                    break
+
+            browser.close()
 
         logger.info("ホームズ %s: %d件取得", area["name"], len(results))
         return results
 
-    def _fetch_page(self, area: dict, path: str, page: int) -> list[Property]:
-        url = BASE + path
-        params = {"page": page} if page > 1 else {}
-        resp = self._get(url, params=params)
-        if resp is None or resp.status_code not in (200, 202):
-            return []
-
-        soup = BeautifulSoup(resp.text, "lxml")
-
-        items = []
-        for sel in ["div[class*=mod-mergeBuilding]", "div[class*=imod-building]",
-                    "li[class*=property]", "div[class*=cassette]", "article"]:
-            candidates = [i for i in soup.select(sel) if len(i.get_text(strip=True)) > 50]
-            if candidates:
-                items = candidates
-                break
-
-        if not items:
-            return []
-
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        props = []
-        for item in items:
-            try:
-                p = self._parse_item(item, area, now)
-                if p:
-                    props.append(p)
-            except Exception as e:
-                logger.debug("homes parse error: %s", e)
-        return props
+    def _find_items(self, soup):
+        for sel in [
+            "div[class*=mod-mergeBuilding]",
+            "div[class*=imod-building]",
+            "li[class*=property]",
+            "div[class*=cassette]",
+            "article",
+        ]:
+            items = [i for i in soup.select(sel) if len(i.get_text(strip=True)) > 50]
+            if items:
+                return items
+        return []
 
     def _parse_item(self, item, area: dict, now: str) -> Property | None:
         text = item.get_text(" ", strip=True)
@@ -116,7 +102,7 @@ class HomesScraper(BaseScraper):
         href = link.get("href", "") if link else ""
         url = BASE + href if href.startswith("/") else href
 
-        price_m = re.search(r'([\d,]+)万円', text)
+        price_m = re.search(r'([\d,]+)\s*万円', text)
         if not price_m:
             return None
         price_man = int(price_m.group(1).replace(",", ""))

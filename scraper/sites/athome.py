@@ -105,7 +105,7 @@ class AthomeScraper(BaseScraper):
         url = BASE + href if href.startswith("/") else href
 
         # 価格
-        price_m = re.search(r'([\d,]+)万円', text)
+        price_m = re.search(r'([\d,]+)\s*万円', text)
         if not price_m:
             return None
         price_man = int(price_m.group(1).replace(",", ""))
