@@ -1,170 +1,117 @@
 """
-Yahoo!不動産 中古一戸建て スクレイパー
+Yahoo!不動産 中古一戸建て スクレイパー（requests使用）
 https://realestate.yahoo.co.jp/
-JavaScript レンダリングが必要なためPlaywrightを使用。
-Playwright未インストール時は requests フォールバック。
 """
 import logging
 import re
+import time
 from datetime import datetime
+
+import requests
+from bs4 import BeautifulSoup
 
 from .base import BaseScraper, Property
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://realestate.yahoo.co.jp/used/house/search/"
+BASE = "https://realestate.yahoo.co.jp"
+
+# エリア名 → Yahoo!不動産 パス（実サイトから確認済み）
+YAHOO_PATH = {
+    "神戸市長田区":  "/used/house/search/06/28/28106/",
+    "神戸市兵庫区":  "/used/house/search/06/28/28105/",
+    "神戸市北区":    "/used/house/search/06/28/28109/",
+    "神戸市垂水区":  "/used/house/search/06/28/28108/",
+    "神戸市須磨区":  "/used/house/search/06/28/28107/",
+    "兵庫県洲本市":  "/used/house/search/06/28/28205/",
+    "徳島県徳島市":  "/used/house/search/08/36/36201/",
+    "徳島県小松島市": "/used/house/search/08/36/36203/",
+    "徳島県阿南市":  "/used/house/search/08/36/36204/",
+    "香川県高松市":  "/used/house/search/08/37/37201/",
+    "香川県坂出市":  "/used/house/search/08/37/37203/",
+    "香川県丸亀市":  "/used/house/search/08/37/37202/",
+}
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.9",
+}
 
 
 class YahooScraper(BaseScraper):
     SITE_NAME = "Yahoo不動産"
 
     def search(self, area: dict) -> list[Property]:
-        try:
-            return self._search_playwright(area)
-        except Exception as e:
-            logger.warning("Yahoo Playwright失敗(%s)。requestsにフォールバック", e)
-            return self._search_requests(area)
-
-    def _search_playwright(self, area: dict) -> list[Property]:
-        from playwright.sync_api import sync_playwright
-
+        path = YAHOO_PATH.get(area["name"])
+        if not path:
+            return []
         results = []
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                )
-            )
-            page = context.new_page()
-
-            for pg in range(1, 6):
-                url = (
-                    f"{BASE_URL}?pref={area['yahoo_pref']}"
-                    f"&city={area['yahoo_city']}"
-                    f"&pricemax=500"
-                    f"&b={pg}"
-                )
-                try:
-                    page.goto(url, timeout=30_000)
-                    page.wait_for_selector("[class*='property']", timeout=10_000)
-                except Exception:
+        for pg in range(1, 4):
+            pg_url = BASE + path if pg == 1 else BASE + path + f"?page={pg}"
+            try:
+                time.sleep(2)
+                resp = requests.get(pg_url, headers=HEADERS, timeout=20, allow_redirects=True)
+                if resp.status_code != 200:
                     break
-
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(page.content(), "lxml")
-                items = (
-                    soup.select("div[class*='property']") or
-                    soup.select("li[class*='cassette']") or
-                    soup.select("article")
-                )
-                if not items:
+                soup = BeautifulSoup(resp.text, "lxml")
+                cards = soup.select("div.ListCassette2__wrap")
+                if not cards:
                     break
-
-                batch = []
-                for item in items:
-                    try:
-                        p = self._parse_item(item, area, now)
-                        if p:
-                            batch.append(p)
-                    except Exception as e2:
-                        logger.debug("Yahoo parse error: %s", e2)
+                now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                batch = [p for p in (self._parse_card(c, area, now) for c in cards) if p]
                 results.extend(batch)
                 if len(batch) < 20:
                     break
-
-            browser.close()
-
-        logger.info("Yahoo不動産(PW) %s: %d件取得", area["name"], len(results))
+            except Exception as e:
+                logger.debug("Yahoo %s page%d エラー: %s", area["name"], pg, e)
+                break
+        logger.info("Yahoo不動産 %s: %d件取得", area["name"], len(results))
         return results
 
-    def _search_requests(self, area: dict) -> list[Property]:
-        results = []
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        for pg in range(1, 4):
-            params = {
-                "pref": area["yahoo_pref"],
-                "city": area["yahoo_city"],
-                "pricemax": "500",
-                "b": pg,
-            }
-            soup = self._soup(BASE_URL, params=params)
-            if soup is None:
-                break
-            items = (
-                soup.select("div[class*='property']") or
-                soup.select("li[class*='cassette']") or
-                soup.select("article")
-            )
-            if not items:
-                break
-            batch = []
-            for item in items:
-                try:
-                    p = self._parse_item(item, area, now)
-                    if p:
-                        batch.append(p)
-                except Exception:
-                    pass
-            results.extend(batch)
-            if len(batch) < 20:
-                break
-        logger.info("Yahoo不動産(req) %s: %d件取得", area["name"], len(results))
-        return results
+    def _parse_card(self, card, area: dict, now: str) -> Property | None:
+        # URL
+        link = card.select_one("a[href*='/used/house/']")
+        url = link.get("href", "") if link else ""
 
-    def _parse_item(self, item, area: dict, now: str) -> Property | None:
-        full_text = item.get_text(" ", strip=True)
-
-        link_el = (
-            item.select_one("h2 a") or
-            item.select_one("[class*='title'] a") or
-            item.select_one("a[href*='/used/house/']")
-        )
-        if not link_el:
-            return None
-        name = link_el.get_text(strip=True)
-        href = link_el.get("href", "")
-        url = f"https://realestate.yahoo.co.jp{href}" if href.startswith("/") else href
-
-        price_el = item.select_one("[class*='price']") or item.select_one("[class*='Price']")
+        # 価格
+        price_el = card.select_one("[class*=info__price]")
         price_text = price_el.get_text(strip=True) if price_el else ""
-        price_yen, price_man = self._parse_price(price_text)
-        if price_yen == 0:
+        price_m = re.search(r"([\d,]+)\s*万円", price_text)
+        if not price_m:
             return None
+        price_man = int(price_m.group(1).replace(",", ""))
 
-        addr_el = item.select_one("[class*='address']") or item.select_one("[class*='Address']")
-        address = addr_el.get_text(strip=True) if addr_el else area["name"]
+        # テキスト全体（住所・間取りを推測）
+        text = card.get_text(" ", strip=True)
 
-        m = re.search(r'\d+(?:LDK|DK|LK|K|SLDK|SDK)', full_text)
-        layout = self._normalize_layout(m.group(0) if m else "")
+        # 住所（説明文から推測）
+        addr_m = re.search(r"((?:神戸|徳島|高松|坂出|丸亀|洲本).{0,20}?(?:区|市|町|丁目))", text)
+        address = addr_m.group(1).strip()[:40] if addr_m else area["name"]
 
-        m_land = re.search(r'土地[面積：\s]*([\d.]+)\s*㎡', full_text)
-        m_bldg = re.search(r'建物[面積：\s]*([\d.]+)\s*㎡', full_text)
-        land_area = float(m_land.group(1)) if m_land else 0.0
-        building_area = float(m_bldg.group(1)) if m_bldg else 0.0
+        # 間取り
+        layout_m = re.search(r"(\d+(?:LDK|DK|LK|K|SLDK))", text)
+        layout = self._normalize_layout(layout_m.group(1)) if layout_m else ""
 
-        building_age = self._parse_age(full_text)
-        building_year = self._parse_build_year(full_text)
+        # 土地・建物
+        land_m = re.search(r"土地[：\s]*([\d.]+)\s*m", text)
+        bldg_m = re.search(r"建物[：\s]*([\d.]+)\s*m", text)
 
         return Property(
             site=self.SITE_NAME,
-            name=name,
+            name=f"{area['name']} 中古戸建",
             url=url,
             address=address,
             area_name=area["name"],
-            price=price_yen,
+            price=price_man * 10_000,
             price_man=price_man,
             layout=layout,
-            land_area=land_area,
-            building_area=building_area,
-            building_year=building_year,
-            building_age=building_age,
-            parking=self._detect_parking(full_text),
-            rebuild_ok=self._detect_rebuild(full_text),
-            sewage=self._detect_sewage(full_text),
+            land_area=float(land_m.group(1)) if land_m else 0.0,
+            building_area=float(bldg_m.group(1)) if bldg_m else 0.0,
+            building_year=self._parse_build_year(text),
+            building_age=self._parse_age(text),
+            parking=self._detect_parking(text),
+            rebuild_ok=self._detect_rebuild(text),
+            sewage=self._detect_sewage(text),
             fetched_at=now,
         )
