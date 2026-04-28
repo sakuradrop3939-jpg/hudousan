@@ -4,6 +4,7 @@ https://www.homes.co.jp/
 """
 import logging
 import re
+import time
 from datetime import datetime
 
 from .base import BaseScraper, Property
@@ -31,10 +32,15 @@ HOMES_PATH = {
 class HomesScraper(BaseScraper):
     SITE_NAME = "ホームズ"
 
+    _call_count = 0
+
     def search(self, area: dict) -> list[Property]:
         path = HOMES_PATH.get(area["name"])
         if not path:
             return []
+        HomesScraper._call_count += 1
+        if HomesScraper._call_count > 1:
+            time.sleep(12)  # レート制限対策：エリア間に12秒待機
         try:
             return self._search_playwright(area, path)
         except Exception as e:
